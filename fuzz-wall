@@ -1,6 +1,7 @@
 #!/bin/sh
 # fuzz-wall - A fuzzel-based wallpaper picker
-# Supports: swaybg, hyprpaper, feh, nitrogen, xwallpaper, swww
+# Supports: awww, mpvpaper, waypaper, swaybg, hyprpaper, feh, nitrogen, xwallpaper, swww
+
 
 # Find wallpaper directory
 find_walldir() {
@@ -21,7 +22,7 @@ WALLDIR="${FUZZ_WALL_DIR:-$(find_walldir)}"
 # Detect wallpaper setter
 detect_setter() {
     if [ -n "$WAYLAND_DISPLAY" ]; then
-        for cmd in swww swaybg hyprpaper xwallpaper; do
+        for cmd in mpvpaper awww swww swaybg hyprpaper xwallpaper; do
             command -v "$cmd" >/dev/null 2>&1 && echo "$cmd" && return
         done
     fi
@@ -36,10 +37,16 @@ set_wallpaper() {
     WALL="$1"
     SETTER="$2"
     case "$SETTER" in
+        mpvpaper)
+            pkill mpvpaper 2>/dev/null
+            mpvpaper '*' "$WALL" --loop-file=inf --mpv-options="--loop" &
+            ;;
         swaybg)
             pkill swaybg 2>/dev/null
             swaybg -i "$WALL" -m fill &
             ;;
+        awww)
+            awww img "$WALL" --transition-type fade ;;
         swww)
             swww img "$WALL" --transition-type fade ;;
         hyprpaper)
@@ -66,10 +73,17 @@ fi
 
 command -v fuzzel >/dev/null 2>&1 || { echo "fuzzel not found"; exit 1; }
 
+WAYPAPER=0
+command -v waypaper >/dev/null 2>&1 && WAYPAPER=1
+
 SETTER=$(detect_setter)
 
 while true; do
     WALL=$(ls "$WALLDIR" | fuzzel --dmenu --prompt "Wallpaper (ESC to exit) > ")
     [ -z "$WALL" ] && exit 0
-    set_wallpaper "$WALLDIR/$WALL" "$SETTER"
+    if [ "$WAYPAPER" -eq 1 ]; then
+        waypaper --wallpaper "$WALLDIR/$WALL"
+    else
+        set_wallpaper "$WALLDIR/$WALL" "$SETTER"
+    fi
 done
