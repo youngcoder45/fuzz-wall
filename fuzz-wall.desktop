@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Wallpaper Picker
+GenericName=Wallpaper Picker
+Comment=Pick and set the desktop wallpaper with fuzzel
+Exec=fuzz-wall
+Icon=preferences-desktop-wallpaper
+Terminal=false
+Categories=Utility;
+Keywords=wallpaper;background;desktop;fuzzel;
+StartupNotify=false
