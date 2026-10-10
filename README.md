@@ -3,6 +3,7 @@
 > A minimal, distro-agnostic wallpaper picker powered by [fuzzel](https://codeberg.org/dnkl/fuzzel).
 
 fuzz-wall lets you browse and set wallpapers interactively using fuzzel's dmenu mode.
+Each wallpaper name shows a small **thumbnail preview** of the image as its icon.
 It auto-detects your wallpaper setter, works on both Wayland and X11, and has zero config files.
 
 ![preview](preview.png) <!-- add a screenshot/gif -->
@@ -17,8 +18,9 @@ It auto-detects your wallpaper setter, works on both Wayland and X11, and has ze
 
 - Works on **Wayland and X11**
 - **Auto-detects** your installed wallpaper setter
+- **Thumbnail previews** of every wallpaper, right in the list
 - Override wallpaper directory with an **env var** — no config editing
-- **No dependencies** beyond fuzzel and a wallpaper setter
+- **No hard dependencies** beyond fuzzel and a wallpaper setter
 - Tiny — just a single POSIX sh script
 
 ---
@@ -68,6 +70,7 @@ fuzz-wall picks whichever one is installed. If you have multiple, it prefers in 
 
 **Optional:**
 - `libnotify` — for error notifications via `notify-send`
+- `libvips` (or `imagemagick`) — generates the wallpaper thumbnail previews. Without one of these, wallpapers are listed without previews.
 
 ---
 
@@ -80,6 +83,8 @@ paru -S fuzz-wall
 # or
 yay -S fuzz-wall
 ```
+
+This also installs a **Wallpaper Picker** entry for your application launcher.
 
 ### Manual (any distro)
 
@@ -122,6 +127,7 @@ No config file needed. The only option is:
 | Env var | Default | Description |
 |---|---|---|
 | `FUZZ_WALL_DIR` | `~/Pictures/wallpapers` | Directory to pick wallpapers from |
+| `FUZZ_WALL_THUMB_SIZE` | `128` | Edge length (px) of the generated preview thumbnails |
 
 You can set it permanently in your shell rc:
 ```bash

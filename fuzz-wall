@@ -1,5 +1,6 @@
 #!/bin/sh
 # fuzz-wall - A fuzzel-based wallpaper picker
+# Shows a small thumbnail of every wallpaper as the icon next to its name.
 # Supports: swaybg, hyprpaper, feh, nitrogen, xwallpaper, swww
 
 # Find wallpaper directory
@@ -17,6 +18,8 @@ find_walldir() {
 }
 
 WALLDIR="${FUZZ_WALL_DIR:-$(find_walldir)}"
+CACHEDIR="${XDG_CACHE_HOME:-$HOME/.cache}/fuzz-wall/thumbs"
+THUMB_SIZE="${FUZZ_WALL_THUMB_SIZE:-128}"
 
 # Detect wallpaper setter
 detect_setter() {
@@ -57,7 +60,54 @@ set_wallpaper() {
     esac
 }
 
-# Checks
+# --- Thumbnails ------------------------------------------------------------
+
+# thumb_path FILE -> cached thumbnail path for FILE
+thumb_path() {
+    name=${1##*/}
+    safe=$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_')
+    printf '%s/%s.png' "$CACHEDIR" "$safe"
+}
+
+# ensure_thumb FILE -> create (or refresh) FILE's thumbnail.
+# Uses whichever image tool is installed; silently does nothing if none is.
+ensure_thumb() {
+    src="$1"
+    dst=$(thumb_path "$src")
+    [ -f "$dst" ] && [ "$dst" -nt "$src" ] && return 0
+
+    mkdir -p "$CACHEDIR" 2>/dev/null || return 1
+    # Unique per wallpaper: background subshells share $$ (parent PID),
+    # so derive the temp name from the destination instead.
+    tmp="${dst%.png}.tmp.$$.png"
+
+    if command -v vipsthumbnail >/dev/null 2>&1; then
+        vipsthumbnail "$src" -s "${THUMB_SIZE}x${THUMB_SIZE}" -c -o "$tmp" >/dev/null 2>&1
+    elif command -v magick >/dev/null 2>&1; then
+        magick "$src" -auto-orient -thumbnail "${THUMB_SIZE}x${THUMB_SIZE}^" \
+            -gravity center -extent "${THUMB_SIZE}x${THUMB_SIZE}" -strip "$tmp" >/dev/null 2>&1
+    elif command -v convert >/dev/null 2>&1; then
+        convert "$src" -auto-orient -thumbnail "${THUMB_SIZE}x${THUMB_SIZE}^" \
+            -gravity center -extent "${THUMB_SIZE}x${THUMB_SIZE}" -strip "$tmp" >/dev/null 2>&1
+    elif command -v vips >/dev/null 2>&1; then
+        vips thumbnail "$src" "$tmp" "$THUMB_SIZE" >/dev/null 2>&1
+    elif command -v ffmpeg >/dev/null 2>&1; then
+        ffmpeg -y -loglevel error -i "$src" -frames:v 1 \
+            -vf "scale=${THUMB_SIZE}:${THUMB_SIZE}:force_original_aspect_ratio=increase,crop=${THUMB_SIZE}:${THUMB_SIZE}" \
+            "$tmp" >/dev/null 2>&1
+    else
+        return 1
+    fi
+
+    if [ -s "$tmp" ]; then
+        mv -f "$tmp" "$dst" 2>/dev/null && return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
+# --- Checks ----------------------------------------------------------------
+
 if [ -z "$WALLDIR" ] || [ ! -d "$WALLDIR" ]; then
     notify-send "fuzz-wall" "No wallpaper directory found! Set FUZZ_WALL_DIR or create ~/Pictures/wallpapers" 2>/dev/null
     echo "Error: No wallpaper directory found. Set FUZZ_WALL_DIR env var or create ~/Pictures/wallpapers" >&2
@@ -66,10 +116,55 @@ fi
 
 command -v fuzzel >/dev/null 2>&1 || { echo "fuzzel not found"; exit 1; }
 
+LIST=$(mktemp) || exit 1
+MENU=$(mktemp) || exit 1
+OUT=$(mktemp) || exit 1
+trap 'rm -f "$LIST" "$MENU" "$OUT"' 0 2 15
+
+# Collect the wallpapers (images only, no sub-directories)
+for f in "$WALLDIR"/*; do
+    [ -f "$f" ] || continue
+    lower=$(printf '%s' "$f" | tr 'A-Z' 'a-z')
+    case "$lower" in
+        *.png|*.jpg|*.jpeg|*.webp|*.gif|*.bmp|*.tif|*.tiff|*.svg) ;;
+        *) continue ;;
+    esac
+    printf '%s\n' "${f##*/}" >> "$LIST"
+done
+
+if [ ! -s "$LIST" ]; then
+    notify-send "fuzz-wall" "No wallpapers found in $WALLDIR" 2>/dev/null
+    echo "No wallpapers found in $WALLDIR" >&2
+    exit 1
+fi
+
+# Build any missing thumbnails up front (in parallel) so fuzzel can show them
+while IFS= read -r name; do
+    ensure_thumb "$WALLDIR/$name" &
+done < "$LIST"
+wait
+
+# fuzzel's (Rofi-compatible) dmenu icon protocol:
+#   <text>\0icon\x1f<path-or-theme-name>
+while IFS= read -r name; do
+    thumb=$(thumb_path "$WALLDIR/$name")
+    if [ -s "$thumb" ]; then
+        printf '%s\000icon\037%s\n' "$name" "$thumb"
+    else
+        printf '%s\n' "$name"
+    fi
+done < "$LIST" > "$MENU"
+
 SETTER=$(detect_setter)
 
 while true; do
-    WALL=$(ls "$WALLDIR" | fuzzel --dmenu --prompt "Wallpaper (ESC to exit) > ")
-    [ -z "$WALL" ] && exit 0
-    set_wallpaper "$WALLDIR/$WALL" "$SETTER"
+    # Force text output (not index) so the selection maps back to a filename,
+    # regardless of what the user configured under [dmenu] in fuzzel.ini.
+    if ! fuzzel --dmenu --override=dmenu.mode=text --prompt "Wallpaper (ESC to exit) > " < "$MENU" > "$OUT"; then
+        exit 0
+    fi
+    name=$(tr '\000' '\n' < "$OUT" | head -n 1)
+    [ -z "$name" ] && exit 0
+    [ -f "$WALLDIR/$name" ] || continue
+    set_wallpaper "$WALLDIR/$name" "$SETTER"
 done
